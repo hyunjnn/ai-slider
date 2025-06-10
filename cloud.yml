@@ -1,0 +1,99 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-slides-service'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/ai-slider-slides-service', './backend/slides_service/']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-slides-service'
+    args: ['push', 'gcr.io/$PROJECT_ID/ai-slider-slides-service']
+    waitFor: ['build-slides-service']
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-slides-service'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'ai-slider-slides-service'
+      - '--image=gcr.io/$PROJECT_ID/ai-slider-slides-service'
+      - '--region=asia-northeast3'
+      - '--platform=managed'
+      - '--concurrency=1'
+      - '--memory=4Gi'
+      - '--set-secrets=GEMINI_API_KEY=gemini-api-key:latest'
+      - '--set-env-vars=GOOGLE_CLOUD_PROJECT=ai-slider-461910'
+      - '--set-env-vars=GCS_BUCKET_NAME=ai-slider-files'
+      - '--ingress=all'
+      - '--allow-unauthenticated'
+    waitFor: ['push-slides-service']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-backend'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/ai-slider-backend', './backend/api/']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-backend'
+    args: ['push', 'gcr.io/$PROJECT_ID/ai-slider-backend']
+    waitFor: ['build-backend']
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-backend'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'ai-slider-backend'
+      - '--image=gcr.io/$PROJECT_ID/ai-slider-backend'
+      - '--region=asia-northeast3'
+      - '--platform=managed'
+      - '--ingress=all'
+      - '--allow-unauthenticated'
+      - '--cpu=1000m'
+      - '--memory=512Mi'
+      - '--set-env-vars=GOOGLE_CLOUD_PROJECT=$PROJECT_ID'
+      - '--set-env-vars=FRONTEND_URL=https://ai-slider-frontend-987235114382.asia-northeast3.run.app'
+      - '--set-env-vars=CLOUD_TASKS_REGION=asia-northeast3'
+      - '--set-env-vars=CLOUD_TASKS_QUEUE_ID=slides-generation-queue'
+      - '--set-env-vars=SLIDES_SERVICE_URL=https://ai-slider-slides-service-987235114382.us-central1.run.app'
+      - '--set-env-vars=GCS_BUCKET_NAME=ai-slider-files'
+    waitFor: ['push-backend', 'deploy-slides-service']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-frontend'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/ai-slider-frontend'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_API_URL=https://ai-slider-backend-987235114382.asia-northeast3.run.app/v1'
+      - './frontend/'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-frontend'
+    args: ['push', 'gcr.io/$PROJECT_ID/ai-slider-frontend']
+    waitFor: ['build-frontend']
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-frontend'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'ai-slider-frontend'
+      - '--image=gcr.io/$PROJECT_ID/ai-slider-frontend'
+      - '--region=asia-northeast3'
+      - '--platform=managed'
+      - '--cpu=1000m'
+      - '--memory=512Mi'
+      - '--ingress=all'
+      - '--allow-unauthenticated'
+      - '--set-env-vars=NEXT_PUBLIC_API_URL=https://ai-slider-backend-987235114382.asia-northeast3.run.app/v1'
+      - '--set-env-vars=NEXT_PUBLIC_URL=https://ai-slider-frontend-987235114382.asia-northeast3.run.app'
+    waitFor: ['push-frontend']
+
+images:
+  - 'gcr.io/$PROJECT_ID/ai-slider-backend'
+  - 'gcr.io/$PROJECT_ID/ai-slider-frontend'
+  - 'gcr.io/$PROJECT_ID/ai-slider-slides-service'
+
+timeout: '1800s'
