@@ -2,9 +2,10 @@ import logging
 from google.cloud import firestore, storage, tasks_v2
 from google.api_core.exceptions import NotFound
 import os
+import io
 import time
 
-from models.slide import FirestoreResult
+from models.slide import File, FirestoreJob, FirestoreResult, Job, SlideSettings, FileReference, TaskPayload, JobStatus
 
 
 class QueueService:
@@ -27,6 +28,102 @@ class QueueService:
 
     def results_collection(self):
         return self.db.collection("results")
+    
+
+    def upload_file_to_gcs(self, job_id: str, file: File) -> str:
+        """Upload a file to Google Cloud Storage and return the path
+        """
+        object_path = f"{job_id}/{file.filename}"
+        
+        bucket = self.storage_client.bucket(self.bucket_name)
+        
+        # If the bucket does not exist, create a new one
+        try:
+            bucket.reload()
+            
+        except NotFound:  
+            try:  
+                bucket.create(location="asia-northeast3")
+                logging.info(f"Created bucket {self.bucket_name}")
+                
+            except Exception as e:
+                raise RuntimeError(f"Failed to create bucket: {e}")
+            
+        except Exception as e:
+            raise RuntimeError(f"Failed to check bucket: {e}")
+        
+        blob = bucket.blob(object_path)
+        
+        try:
+            blob.upload_from_file(io.BytesIO(file.data), content_type=file.type)
+            logging.info("Success GCS Upload :%s", object_path)
+            
+        except Exception as e:
+            logging.error("Failed GCS Upload : %s", str(e))
+            raise RuntimeError(f"Failed to upload file to GCS: {e}")
+        
+        logging.info(f"Upload file {file.filename} to GCS: gs://{self.bucket_name}/{object_path}")    
+        return object_path
+    
+    
+    def add_job(self, job_id: str, theme: str, file_data: list[File], settings: SlideSettings) -> Job:
+        """Create a Job in Firestore -> Upload a file to GCS -> Create a Cloud Task -> Return the Job structure
+        """
+        now = int(time.time())
+        
+        firestore_job = FirestoreJob(
+            id=job_id,
+            status=JobStatus.QUEUED.value,
+            message="Job added to queue",
+            createdAt=now,
+            updatedAt=now,
+        )
+        
+        try:
+            logging.info(f"Saving Firestore job: {firestore_job.model_dump()}")
+            self.collection().document(job_id).set(firestore_job.model_dump())
+            
+        except Exception as e:
+            logging.error(f"Firestore save failed: {e}")
+            raise RuntimeError("failed to store job")
+
+        job = Job(
+            id=job_id,
+            theme=theme,
+            files=file_data,
+            settings=settings,
+            status=JobStatus.QUEUED,
+            message="Job added to queue",
+            createdAt=now,
+            updatedAt=now
+        )
+        
+        file_refs = []
+        for file in file_data:
+            try:
+                gcs_path = self.upload_file_to_gcs(job_id, file)
+                
+            except Exception as e:
+                self.update_job_status(job, JobStatus.FAILED, f"Failed to upload file {file.filename}: {e}", "")
+                raise RuntimeError(f"failed to upload file: {e}")
+                
+            file_refs.append(FileReference(filename=file.filename, type=file.type, gcsPath=gcs_path))
+
+        task_payload = TaskPayload(
+            jobID=job_id,
+            theme=theme,
+            files=file_refs,
+            settings=settings
+        )
+        
+        try:
+            self._create_cloud_task(task_payload)
+            
+        except Exception as e:
+            self.update_job_status(job, JobStatus.FAILED, f"Failed to queue job: {e}", "") 
+            raise RuntimeError(f"failed to create Cloud Task: {e}")
+        
+        return job
     
     
     def get_result(self, job_id: str) -> FirestoreResult:
@@ -59,7 +156,6 @@ class QueueService:
         if result_data is None:
             raise RuntimeError("result data is empty")
 
-        
         now = int(time.time())
         expires_at = result_data.get("expiresAt", 0)
         if expires_at > 0 and now > expires_at:
