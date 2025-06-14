@@ -4,8 +4,9 @@ from google.api_core.exceptions import NotFound
 import os
 import io
 import time
+import json
 
-from models.slide import File, FirestoreJob, FirestoreResult, Job, SlideSettings, FileReference, TaskPayload, JobStatus
+from models.slide import File, FirestoreJob, FirestoreResult, Job, JobUpdate, SlideSettings, FileReference, TaskPayload, JobStatus
 
 
 class QueueService:
@@ -21,34 +22,27 @@ class QueueService:
         self.service_url = os.getenv("SLIDES_SERVICE_URL")
         self.bucket_name = os.getenv("GCS_BUCKET_NAME", "ai-slider-files")
 
-
     def collection(self):
         return self.db.collection("jobs")
     
-
     def results_collection(self):
         return self.db.collection("results")
     
-
     def upload_file_to_gcs(self, job_id: str, file: File) -> str:
         """Upload a file to Google Cloud Storage and return the path
         """
         object_path = f"{job_id}/{file.filename}"
-        
         bucket = self.storage_client.bucket(self.bucket_name)
         
         # If the bucket does not exist, create a new one
         try:
             bucket.reload()
-            
         except NotFound:  
             try:  
                 bucket.create(location="asia-northeast3")
                 logging.info(f"Created bucket {self.bucket_name}")
-                
             except Exception as e:
                 raise RuntimeError(f"Failed to create bucket: {e}")
-            
         except Exception as e:
             raise RuntimeError(f"Failed to check bucket: {e}")
         
@@ -57,7 +51,6 @@ class QueueService:
         try:
             blob.upload_from_file(io.BytesIO(file.data), content_type=file.type)
             logging.info("Success GCS Upload :%s", object_path)
-            
         except Exception as e:
             logging.error("Failed GCS Upload : %s", str(e))
             raise RuntimeError(f"Failed to upload file to GCS: {e}")
@@ -82,7 +75,6 @@ class QueueService:
         try:
             logging.info(f"Saving Firestore job: {firestore_job.model_dump()}")
             self.collection().document(job_id).set(firestore_job.model_dump())
-            
         except Exception as e:
             logging.error(f"Firestore save failed: {e}")
             raise RuntimeError("failed to store job")
@@ -102,7 +94,6 @@ class QueueService:
         for file in file_data:
             try:
                 gcs_path = self.upload_file_to_gcs(job_id, file)
-                
             except Exception as e:
                 self.update_job_status(job, JobStatus.FAILED, f"Failed to upload file {file.filename}: {e}", "")
                 raise RuntimeError(f"failed to upload file: {e}")
@@ -118,12 +109,62 @@ class QueueService:
         
         try:
             self._create_cloud_task(task_payload)
-            
         except Exception as e:
             self.update_job_status(job, JobStatus.FAILED, f"Failed to queue job: {e}", "") 
             raise RuntimeError(f"failed to create Cloud Task: {e}")
         
         return job
+    
+    
+    def _create_cloud_task(self, payload: TaskPayload):
+        parent = self.tasks_client.queue_path(self.project_id, self.region, self.queue_id)
+        task_url = f"{self.service_url}/tasks/process-slides"
+        
+        print("Sending TaskPayload: ", payload.model_dump())
+        print("Task URL: ", task_url)
+        
+        try:
+            payload_bytes = json.dumps(payload.model_dump()).encode()
+        except Exception as e:
+            raise RuntimeError(f"Failed to serialize task payload: {e}")
+
+        task = {
+            "http_request": {
+                "http_method": tasks_v2.HttpMethod.POST,
+                "url": task_url,
+                "headers": {"Content-Type": "application/json"},
+                "body": payload_bytes,
+                "oidc_token": {
+                    "service_account_email": f"slides-service-invoker@{self.project_id}.iam.gserviceaccount.com",
+                    "audience": task_url
+                }
+            }
+        }
+
+        self.tasks_client.create_task(request={"parent": parent, "task": task})
+    
+    
+    def update_job_status(self, job: Job, status: JobStatus, message: str, result_url: str = ""):
+        now = int(time.time())
+        
+        updates = {
+            "status": status.value,
+            "message": message,
+            "updatedAt": now,
+        }
+        
+        try: 
+            self.collection().document(job.id).update(updates)
+        except Exception as e:
+            logging.error(f"Failed to update job status in Firestore: {e}")
+            
+        job.status = status
+        job.message = message
+        job.updatedAt = now
+        if result_url:
+            job.resultUrl = result_url
+            
+        logging.info(f"Job {job.id} updated: status={status}, message={message}")
     
     
     def get_result(self, job_id: str) -> FirestoreResult:
