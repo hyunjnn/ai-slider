@@ -54,7 +54,7 @@ steps:
       - '--set-env-vars=FRONTEND_URL=https://ai-slider-frontend-987235114382.asia-northeast3.run.app'
       - '--set-env-vars=CLOUD_TASKS_REGION=asia-northeast3'
       - '--set-env-vars=CLOUD_TASKS_QUEUE_ID=slides-generation-queue'
-      - '--set-env-vars=SLIDES_SERVICE_URL=https://ai-slider-slides-service-987235114382.us-central1.run.app'
+      - '--set-env-vars=SLIDES_SERVICE_URL=https://ai-slider-slides-service-987235114382.asia-northeast3.run.app'
       - '--set-env-vars=GCS_BUCKET_NAME=ai-slider-files'
     waitFor: ['push-backend', 'deploy-slides-service']
 
