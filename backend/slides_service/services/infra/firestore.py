@@ -1,13 +1,17 @@
-import logging
 import time
+import logging
+
 from google.cloud import firestore
 
 from models.task import FireStoreResult
 
 
 class FirestoreService:
+    
+    
     def __init__(self):
         self.client = firestore.Client()
+        
         
     def update_job_status(self, job_id: str, status: str, message: str, result_url: str = "") -> None:
         """Update the job document with new status and message
@@ -24,6 +28,7 @@ class FirestoreService:
         except Exception as e:
             logging.error(f"Faild to update job status in Firestore: {e}")
             raise  
+        
         
     def set_job_completed(self, job_id: str, message: str, result_url: str = ""):
         """Mark the job as completed and set its expiration time
@@ -42,6 +47,7 @@ class FirestoreService:
         except Exception as e:
             logging.error(f"Failed to mark job as completed in Firestore: {e}")
             raise
+        
         
     def store_result(self, job_id: str, result_url: str, pdf_data: bytes, html_data: bytes) -> None:
         """Store the final job result (PDF + HTML) in Firestore

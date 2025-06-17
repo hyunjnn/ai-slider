@@ -1,12 +1,16 @@
-import logging
 import os
+import logging
+
 from google.cloud import storage
 
 
 class GCSService:
+    
+    
     def __init__(self):
         self.client = storage.Client()
         self.bucket = self.client.bucket(os.environ.get("GCS_BUCKET_NAME"))
+        
         
     def download_file_from_gcs(self, gcs_path: str):
         try: 
@@ -19,6 +23,7 @@ class GCSService:
         except Exception as e:
             logging.error(f"Failed to download {gcs_path} from GCS: {e}")
             raise
+        
         
     def delete_file_from_gcs(self, gcs_path: str) -> None:
         blob = self.bucket.blob(gcs_path)
