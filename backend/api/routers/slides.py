@@ -1,18 +1,19 @@
+import os
 import json
 import logging
 import mimetypes
 from typing import Optional
-from uuid import uuid4
-from fastapi import APIRouter, Form, HTTPException, Query, Response, UploadFile, File as FastAPIFile
-from fastapi.responses import HTMLResponse, JSONResponse
+
+from fastapi import APIRouter, Form, HTTPException, Query, Request, Response, UploadFile, File as FastAPIFile
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+
 from models.slide import  File, FirestoreResult, Job, SlideRequest, SlideResponse
 from utils.mime import validate_file_type
 from services.queue import QueueService
-from google.cloud import firestore
 
 
 router = APIRouter()
-db = firestore.Client()
+
 service = QueueService()
 
 @router.post("/slides")
@@ -27,19 +28,15 @@ async def generate_slides(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid request format: {str(e)}")
 
-    # Validate theme
     if slide_req.theme not in SlideRequest.valid_themes:
         raise HTTPException(status_code=400, detail=f"Invalid theme: {slide_req.theme}. Supported themes are: {', '.join(SlideRequest.valid_themes)}")
 
-    # Validate slideDetail
     if slide_req.settings.slideDetail and slide_req.settings.slideDetail not in SlideRequest.valid_slide_details:
         raise HTTPException(status_code=400, detail=f"Invalid slideDetail: {slide_req.settings.slideDetail}. Supported values are: {', '.join(SlideRequest.valid_slide_details)}")
 
-    # Validate audience
     if slide_req.settings.audience and slide_req.settings.audience not in SlideRequest.valid_audiences:
         raise HTTPException(status_code=400, detail=f"Invalid audience: {slide_req.settings.audience}. Supported values are: {', '.join(SlideRequest.valid_audiences)}")
 
-    # Validate and read files
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded")
 
@@ -55,11 +52,9 @@ async def generate_slides(
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to read file {file.filename}: {str(e)}")
 
-    job_id = str(uuid4())
-
-    # Add job to queue
+    # Add Job to Queue
     try:
-        job : Job = await service.add_job(job_id, slide_req.theme, file_data_list, slide_req.settings)
+        job : Job = service.add_job(slide_req.theme, file_data_list, slide_req.settings)
     except Exception as e:
         raise HTTPException(status_code=503, detail=str(e))
 
@@ -68,37 +63,70 @@ async def generate_slides(
     return JSONResponse(
         status_code=202,
         content=SlideResponse(
-            id=job_id,
+            id=job.id,
             status=job.status,
             message=job.message,
             createdAt=job.createdAt,
             updatedAt=job.updatedAt
         ).model_dump()
     )
+             
+@router.get("/slides/{id}")
+async def stream_slide_status(
+    request: Request, 
+    id: str
+):
+    """Returns slide status via SSE or JSON. 
+       Closes stream when job is completed or failed.
+    """
+    job : Job = service.get_job_by_id(id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
     
+    accept_header = request.headers.get("Accept", "")
+    
+    if "text/event-stream" not in accept_header:
+        return JSONResponse({
+            "id": job.id,
+            "status": job.status,
+            "message": job.message,
+            "resultUrl": job.resultUrl,
+            "updatedAt": job.updatedAt
+        })  
 
+    return StreamingResponse(
+        service.stream_events(request, id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Transfer-Encoding": "chunked",
+            "Access-Control-Allow-Origin": os.getenv("FRONTEND_URL", "http://localhost:3000"),
+            "X-Accel-Buffering": "no",
+        }
+    ) 
+    
 @router.get("/results/{id}") 
 async def get_slide_result(
     id: str, 
     download: Optional[bool] = Query(False)
 ):
-    """_summary_
+    """Returns slide result (PDF or HTML).  
+       Automatically deletes the result if it is expired.
     """
     try:
-        result : FirestoreResult = service.get_result(id)
+        result : FirestoreResult = service.get_result_by_id(id)
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Result not found: {e}")
     
     if download:
         return Response(
-            content=result.pdfData,
             media_type="application/pdf",
             headers={
                 "Content-Disposition": f"attachment; filename=presentation-{id}.pdf"
-            }
+            },
+            content=result.pdfData
         )
     else:
-        return HTMLResponse(
-            content=result.htmlData,
-            status_code=200
-        )
+        return HTMLResponse(status_code=200, content=result.htmlData)
+        
