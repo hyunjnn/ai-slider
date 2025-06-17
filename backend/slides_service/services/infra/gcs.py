@@ -16,7 +16,7 @@ class GCSService:
         try: 
             blob = self.bucket.blob(gcs_path)
             if not blob.exists():
-                raise FileNotFoundError(f"Object {gcs_path} not found in bucket {self.bucket_name}")
+                raise FileNotFoundError(f"Object {gcs_path} not found in bucket {self.bucket}")
             data = blob.download_as_bytes()
             content_type = blob.content_type or "application/actet-stream"
             return data, content_type

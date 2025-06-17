@@ -4,8 +4,8 @@ from fastapi.responses import JSONResponse
 
 from services.slides.slides_service import SlideService
 from services.infra.firestore import FirestoreService
-from models.task import File, TaskPayload
 from services.infra.gcs import GCSService
+from models.task import File, TaskPayload
 
 
 router = APIRouter()

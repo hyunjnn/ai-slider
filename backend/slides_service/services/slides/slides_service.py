@@ -7,10 +7,13 @@ import subprocess
 from typing import Callable, List, Tuple
 
 import google.generativeai as genai
+
 from services.slides.prompts_service import PromptsService
 from models.task import File, SlideSettings
 
 class SlideService:
+    
+    
     def __init__(self):
         """Initialize the Gemini model and prompt service
         """
@@ -21,6 +24,7 @@ class SlideService:
             }
         )
         self.prompt_service = PromptsService()
+        
 
     async def generate_slides(
         self,
@@ -32,6 +36,7 @@ class SlideService:
         """Generate slides from uploaded files and user-defined settings
         """
         await status_update_fn("Analyzing your uploaded files...")
+        # await asyncio.sleep(5)
         gemini_files = []
         for file in files:
             file_reader = io.BytesIO(file.data)
@@ -39,10 +44,12 @@ class SlideService:
             gemini_files.append(gemini_file)
 
         await status_update_fn("Designing your presentation...")
+
         prompt = self.prompt_service.generate_prompt(theme, settings)
         logging.info("Prompts: ", prompt)
 
         await status_update_fn("Preparing the slide content...")
+
         parts = [{"file_data": {"uri": f.uri}} for f in gemini_files]
         parts.append({"text": prompt})
         
@@ -60,7 +67,9 @@ class SlideService:
             raise ValueError("Failed to generate presentation.")
 
         await status_update_fn("Finalizing your slides...")
+
         return self.render_with_marp(marp_text, theme)
+
 
     def render_with_marp(self, markdown: str, theme: str) -> Tuple[bytes, bytes]:
         """Render the markdown content into PDF and HTML using Marp CLI
@@ -89,6 +98,7 @@ class SlideService:
         finally:
             shutil.rmtree(temp_dir)
 
+
     def run_marp_cli(self, input_path: str, output_path: str, extra_args: List[str]):
         """Execute the Marp CLI command to convert markdown into slides
         """
@@ -103,6 +113,7 @@ class SlideService:
         if result.returncode != 0:
             logging.error("Marp CLI error: %s", result.stderr.decode())
             raise RuntimeError("Failed to render presentation with Marp")
+
 
     def extract_markdown_content(self, text: str) -> str:
         """Extract markdown content from the Gemini model's response
