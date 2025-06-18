@@ -26,19 +26,29 @@ async def generate_slides(
         req_data = json.loads(data)
         slide_req = SlideRequest(**req_data)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid request format: {str(e)}")
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid request format: {str(e)}")
 
     if slide_req.theme not in SlideRequest.valid_themes:
-        raise HTTPException(status_code=400, detail=f"Invalid theme: {slide_req.theme}. Supported themes are: {', '.join(SlideRequest.valid_themes)}")
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid theme: {slide_req.theme}. Supported themes are: {', '.join(SlideRequest.valid_themes)}")
 
     if slide_req.settings.slideDetail and slide_req.settings.slideDetail not in SlideRequest.valid_slide_details:
-        raise HTTPException(status_code=400, detail=f"Invalid slideDetail: {slide_req.settings.slideDetail}. Supported values are: {', '.join(SlideRequest.valid_slide_details)}")
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid slideDetail: {slide_req.settings.slideDetail}. Supported values are: {', '.join(SlideRequest.valid_slide_details)}")
 
     if slide_req.settings.audience and slide_req.settings.audience not in SlideRequest.valid_audiences:
-        raise HTTPException(status_code=400, detail=f"Invalid audience: {slide_req.settings.audience}. Supported values are: {', '.join(SlideRequest.valid_audiences)}")
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid audience: {slide_req.settings.audience}. Supported values are: {', '.join(SlideRequest.valid_audiences)}")
 
     if not files:
-        raise HTTPException(status_code=400, detail="No files uploaded")
+        raise HTTPException(
+            status_code=400, 
+            detail="No files uploaded")
 
     file_data_list = []
     for file in files:
@@ -46,17 +56,23 @@ async def generate_slides(
             content = await file.read()
             mime_type = mimetypes.guess_type(file.filename)[0] or "application/octet-stream"
             if not validate_file_type(file.filename):
-                raise HTTPException(status_code=400, detail=f"Unsupported file type: {file.filename}. Only PDF, Markdown, and TXT files are allowed")
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Unsupported file type: {file.filename}. Only PDF, Markdown, and TXT files are allowed")
 
             file_data_list.append(File(filename=file.filename, data=content, type=mime_type))
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to read file {file.filename}: {str(e)}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Failed to read file {file.filename}: {str(e)}")
 
     # Add Job to Queue
     try:
         job : Job = service.add_job(slide_req.theme, file_data_list, slide_req.settings)
     except Exception as e:
-        raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(
+            status_code=503, 
+            detail=str(e))
 
     logging.info(f"Received slide generation request: Theme: {slide_req.theme}, Files count: {len(file_data_list)}, Settings: {slide_req.settings}")
 
@@ -117,7 +133,9 @@ async def get_slide_result(
     try:
         result : FirestoreResult = service.get_result_by_id(id)
     except Exception as e:
-        raise HTTPException(status_code=404, detail=f"Result not found: {e}")
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Result not found: {e}")
     
     if download:
         return Response(
@@ -128,5 +146,7 @@ async def get_slide_result(
             content=result.pdfData
         )
     else:
-        return HTMLResponse(status_code=200, content=result.htmlData)
+        return HTMLResponse(
+            status_code=200, 
+            content=result.htmlData)
         

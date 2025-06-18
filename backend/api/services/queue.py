@@ -1,15 +1,22 @@
-import logging
-from google.cloud import firestore, storage, tasks_v2
-from google.api_core.exceptions import NotFound
 import os
 import io
 import time
 import json
+import asyncio
+import logging
+from typing import AsyncGenerator
+from uuid import uuid4
 
-from models.slide import File, FirestoreJob, FirestoreResult, Job, JobUpdate, SlideSettings, FileReference, TaskPayload, JobStatus
+from fastapi import Request
+from google.cloud import firestore, storage, tasks_v2
+from google.api_core.exceptions import NotFound
+
+from models.slide import File, FirestoreJob, FirestoreResult, Job, SlideSettings, FileReference, TaskPayload, JobStatus
 
 
 class QueueService:
+    
+    
     def __init__(self):
         # self.db = firestore.AsyncClient()
         self.db = firestore.Client()
@@ -21,12 +28,15 @@ class QueueService:
         self.queue_id = os.getenv("CLOUD_TASKS_QUEUE_ID", "slides-generation-queue")
         self.service_url = os.getenv("SLIDES_SERVICE_URL")
         self.bucket_name = os.getenv("GCS_BUCKET_NAME", "ai-slider-files")
+        
 
     def collection(self):
         return self.db.collection("jobs")
     
+    
     def results_collection(self):
         return self.db.collection("results")
+    
     
     def upload_file_to_gcs(self, job_id: str, file: File) -> str:
         """Upload a file to Google Cloud Storage and return the path
@@ -59,9 +69,10 @@ class QueueService:
         return object_path
     
     
-    def add_job(self, job_id: str, theme: str, file_data: list[File], settings: SlideSettings) -> Job:
+    def add_job(self, theme: str, file_data: list[File], settings: SlideSettings) -> Job:
         """Create a Job in Firestore -> Upload a file to GCS -> Create a Cloud Task -> Return the Job structure
         """
+        job_id = str(uuid4())
         now = int(time.time())
         
         firestore_job = FirestoreJob(
@@ -108,7 +119,7 @@ class QueueService:
         )
         
         try:
-            self._create_cloud_task(task_payload)
+            self.__create_cloud_task(task_payload)
         except Exception as e:
             self.update_job_status(job, JobStatus.FAILED, f"Failed to queue job: {e}", "") 
             raise RuntimeError(f"failed to create Cloud Task: {e}")
@@ -116,12 +127,9 @@ class QueueService:
         return job
     
     
-    def _create_cloud_task(self, payload: TaskPayload):
+    def __create_cloud_task(self, payload: TaskPayload):
         parent = self.tasks_client.queue_path(self.project_id, self.region, self.queue_id)
         task_url = f"{self.service_url}/tasks/process-slides"
-        
-        print("Sending TaskPayload: ", payload.model_dump())
-        print("Task URL: ", task_url)
         
         try:
             payload_bytes = json.dumps(payload.model_dump()).encode()
@@ -167,7 +175,147 @@ class QueueService:
         logging.info(f"Job {job.id} updated: status={status}, message={message}")
     
     
-    def get_result(self, job_id: str) -> FirestoreResult:
+    def get_job_by_id(self, job_id: str):
+        try:
+            doc = self.collection().document(job_id).get()
+        except NotFound:
+            logging.info(f"Job {job_id} not found in Firestore")
+            return None
+        except Exception as e:
+            logging.error(f"Error retrieving job {job_id}: {e}")
+            return None
+        
+        if not doc.exists:
+            logging.info(f"Job {job_id} does not exise")
+            return None
+        
+        firestore_job_data = doc.to_dict()
+        if firestore_job_data is None:
+            logging.warning("Job data is None")
+            return None
+        
+        now = int(time.time())
+        expires_at = firestore_job_data.get("expiresAt", 0)
+        if expires_at is not None and expires_at > 0 and now > expires_at:
+            try:
+                self.collection().document(job_id).delete()
+                logging.info(f"Deleted expired job {job_id}")
+            except Exception as e:
+                logging.error(f"Failed to delete expired job {job_id}: {e}")
+            return None
+        
+        result_url = None
+        if firestore_job_data.get("status") == JobStatus.COMPLETED.value:
+            try:
+                result_doc = self.results_collection().document(job_id).get()
+                if result_doc.exists:
+                    result_data = result_doc.to_dict()
+                    result_data = result_data.get("resultUrl")
+            except Exception as e:
+                logging.warning(f"Failed to fetch result for job {job_id}: {e}")
+
+        return {
+            "id": firestore_job_data["id"],
+            "status": JobStatus(firestore_job_data["status"]),
+            "message": firestore_job_data["message"],
+            "resultUrl": result_url,
+            "createdAt": firestore_job_data["createdAt"],
+            "updatedAt": firestore_job_data["updatedAt"],
+        }    
+        
+    
+    async def stream_events(self, request: Request, job_id: str) -> AsyncGenerator[str, None]:
+        """Streams real-time job status updates via Server-Sent Events (SSE).
+        """
+        queue: asyncio.Queue = asyncio.Queue()
+
+        watch_task = asyncio.create_task(self.watch_job(job_id, queue))
+
+        try:
+            while True:
+                if await request.is_disconnected():
+                    watch_task.cancel()
+                    break
+
+                try:
+                    update = await asyncio.wait_for(queue.get(), timeout=30)
+                except asyncio.TimeoutError:
+                    yield "event: ping\ndata: {}\n\n"
+                    continue
+
+                if update is None:
+                    break
+
+                yield f"event: update\ndata: {json.dumps(update)}\n\n"
+
+                if update["status"] in ("completed", "failed"):
+                    yield f"event: close\ndata: {json.dumps({ 'id': update['id'], 'status': update['status'], 'message': 'Stream closing normally' })}\n\n"
+                    await asyncio.sleep(0.3)
+                    break
+        finally:
+            watch_task.cancel()
+        
+  
+    async def watch_job(self, job_id: str, updates: asyncio.Queue) -> None:
+        loop = asyncio.get_event_loop()
+
+        doc_ref = self.db.collection("jobs").document(job_id)
+        doc = doc_ref.get()
+        if not doc.exists:
+            raise ValueError("job not found")
+
+        data = doc.to_dict()
+        await updates.put({
+            "id": job_id,
+            "status": data.get("status"),
+            "message": data.get("message"),
+            "resultUrl": data.get("resultUrl"),
+            "updatedAt": data.get("updatedAt")
+        })
+
+        if data.get("status") in [JobStatus.COMPLETED, JobStatus.FAILED]:
+            return
+
+        stop_event = asyncio.Event()
+
+        def on_snapshot(docs, changes, read_time):
+            for doc in docs:
+                data = doc.to_dict()
+                result_url = data.get("resultUrl")
+                
+                if data.get("status") == JobStatus.COMPLETED.value:
+                    try:
+                        result_doc = self.db.collection("results").document(job_id).get()
+                        if result_doc.exists:
+                            result_data = result_doc.to_dict()
+                            result_url = result_data.get("resultUrl", result_url)
+                    except Exception as e:
+                        print(f"Failed to fetch resultUrl from results/{job_id}: {e}")
+
+                update = {
+                    "id": job_id,
+                    "status": data.get("status"),
+                    "message": data.get("message"),
+                    "resultUrl": result_url,
+                    "updatedAt": data.get("updatedAt"),
+                }
+
+                asyncio.run_coroutine_threadsafe(updates.put(update), loop)
+
+                if update["status"] in [JobStatus.COMPLETED.value, JobStatus.FAILED.value]:
+                    asyncio.run_coroutine_threadsafe(stop_event.set(), loop)
+
+        unsubscribe = doc_ref.on_snapshot(on_snapshot)
+
+        try:
+            await stop_event.wait()
+        except asyncio.CancelledError:
+            pass
+        finally:
+            unsubscribe() 
+    
+    
+    def get_result_by_id(self, job_id: str) -> FirestoreResult:
         """
         Retrieve the slide generation result from Firestore.
 

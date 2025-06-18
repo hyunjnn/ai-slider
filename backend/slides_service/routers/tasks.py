@@ -75,6 +75,3 @@ async def process_slides(
 
     return JSONResponse(content={"status": "success", "jobID": payload.jobID})
     
-    
-
-    
