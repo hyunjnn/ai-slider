@@ -1,6 +1,6 @@
 ## Architecture
 
-![alt text](docs/drawio1.svg)
+![alt text](docs/drawio2.svg)
 
 ## Screenshot
 
