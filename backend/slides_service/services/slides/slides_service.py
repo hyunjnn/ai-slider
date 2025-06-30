@@ -1,15 +1,15 @@
-import os
 import io
-import shutil
-import tempfile
 import logging
+import os
+import shutil
 import subprocess
+import tempfile
 from typing import Callable, List, Tuple
 
 import google.generativeai as genai
-
-from services.slides.prompts_service import PromptsService
 from models.task import File, SlideSettings
+from services.slides.prompts_service import PromptsService
+
 
 class SlideService:
     

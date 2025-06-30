@@ -1,16 +1,16 @@
-import os
 import json
 import logging
 import mimetypes
 from typing import Optional
 
-from fastapi import APIRouter, Form, HTTPException, Query, Request, Response, UploadFile, File as FastAPIFile
+from fastapi import APIRouter
+from fastapi import File as FastAPIFile
+from fastapi import Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-
-from models.slide import  File, FirestoreResult, Job, SlideRequest, SlideResponse
-from utils.mime import validate_file_type
+from models.slide import (File, FirestoreResult, Job, SlideRequest,
+                          SlideResponse)
 from services.queue import QueueService
-
+from utils.mime import validate_file_type
 
 router = APIRouter()
 
@@ -117,7 +117,7 @@ async def stream_slide_status(
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "Transfer-Encoding": "chunked",
-            "Access-Control-Allow-Origin": os.getenv("FRONTEND_URL", "http://localhost:3000"),
+            "Access-Control-Allow-Origin": "https://ai-slider-frontend-987235114382.asia-northeast3.run.app",
             "X-Accel-Buffering": "no",
         }
     ) 

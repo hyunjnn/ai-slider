@@ -1,8 +1,7 @@
-import time
 import logging
+import time
 
 from google.cloud import firestore
-
 from models.task import FireStoreResult
 
 

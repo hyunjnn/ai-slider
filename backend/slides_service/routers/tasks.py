@@ -1,12 +1,11 @@
 import logging
+
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
-
-from services.slides.slides_service import SlideService
+from models.task import File, TaskPayload
 from services.infra.firestore import FirestoreService
 from services.infra.gcs import GCSService
-from models.task import File, TaskPayload
-
+from services.slides.slides_service import SlideService
 
 router = APIRouter()
 

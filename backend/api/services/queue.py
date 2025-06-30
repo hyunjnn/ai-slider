@@ -1,17 +1,17 @@
-import os
-import io
-import time
-import json
 import asyncio
+import io
+import json
 import logging
+import os
+import time
 from typing import AsyncGenerator
 from uuid import uuid4
 
 from fastapi import Request
-from google.cloud import firestore, storage, tasks_v2
 from google.api_core.exceptions import NotFound
-
-from models.slide import File, FirestoreJob, FirestoreResult, Job, SlideSettings, FileReference, TaskPayload, JobStatus
+from google.cloud import firestore, storage, tasks_v2
+from models.slide import (File, FileReference, FirestoreJob, FirestoreResult,
+                          Job, JobStatus, SlideSettings, TaskPayload)
 
 
 class QueueService:
