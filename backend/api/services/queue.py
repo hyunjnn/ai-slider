@@ -10,8 +10,17 @@ from uuid import uuid4
 from fastapi import Request
 from google.api_core.exceptions import NotFound
 from google.cloud import firestore, storage, tasks_v2
-from models.slide import (File, FileReference, FirestoreJob, FirestoreResult,
-                          Job, JobStatus, SlideSettings, TaskPayload)
+
+from models.slide import (
+    File,
+    FileReference,
+    FirestoreJob,
+    FirestoreResult,
+    Job,
+    JobStatus,
+    SlideSettings,
+    TaskPayload,
+)
 
 
 class QueueService:

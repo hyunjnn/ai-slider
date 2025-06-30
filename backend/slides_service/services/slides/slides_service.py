@@ -7,6 +7,7 @@ import tempfile
 from typing import Callable, List, Tuple
 
 import google.generativeai as genai
+
 from models.task import File, SlideSettings
 from services.slides.prompts_service import PromptsService
 

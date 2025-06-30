@@ -7,8 +7,8 @@ from fastapi import APIRouter
 from fastapi import File as FastAPIFile
 from fastapi import Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-from models.slide import (File, FirestoreResult, Job, SlideRequest,
-                          SlideResponse)
+
+from models.slide import File, FirestoreResult, Job, SlideRequest, SlideResponse
 from services.queue import QueueService
 from utils.mime import validate_file_type
 
