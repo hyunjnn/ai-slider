@@ -1,0 +1,17 @@
+[tool.isort]
+profile = "black" 
+
+known_first_party = [
+    "models",
+    "utils",
+    "services",
+    "routers",
+]
+
+lines_between_sections = 1
+
+# 기본 순서
+# sections = "FUTURE,STDLIB,THIRDPARTY,FIRSTPARTY,LOCALFOLDER"
+
+# THIRDPARTY 모듈 명시
+# known_third_party = ["fastapi", "google", "pydantic", "dotenv"]
